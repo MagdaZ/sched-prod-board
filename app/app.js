@@ -8,6 +8,8 @@ const empty = document.querySelector('[data-testid="empty"]');
 const list = document.querySelector('[data-testid="incident-list"]');
 const errorBox = document.querySelector('[data-role="error"]');
 const updated = document.querySelector('[data-role="updated"]');
+const newBar = document.querySelector('[data-testid="new-bar"]');
+const newBarText = newBar.querySelector('span');
 
 /** id -> <li>; rows are kept across refreshes so the acked mark and focus survive (R1, R2). */
 const rows = new Map();
@@ -63,8 +65,22 @@ function buildRow(i) {
   return li;
 }
 
-/** Puts the list in the API's order (newest first) and reuses rows that are already on screen. */
-function render(incidents) {
+/** Updates a row already on screen in place: text only, so nothing moves. */
+function refreshRow(li, i) {
+  // keep what is current: the API can move openedAt, severity or summary between refreshes
+  li.className = `row ${i.severity}${acked.has(i.id) ? ' is-acked' : ''}`;
+  li.querySelector('.sev').textContent = i.severity;
+  li.querySelector('.what').textContent = `${i.service} · ${i.region} · ${i.summary}`;
+  const time = li.querySelector('time');
+  if (time.getAttribute('datetime') !== i.openedAt) {
+    time.setAttribute('datetime', i.openedAt);
+    time.title = i.openedAt;
+    time.textContent = formatLocal(i.openedAt);
+  }
+}
+
+/** Puts the whole list on screen in the API's order (newest first), reusing rows already there. */
+function showAll(incidents) {
   const seen = new Set();
   let prev = null;
   for (const i of incidents) {
@@ -74,16 +90,7 @@ function render(incidents) {
       li = buildRow(i);
       rows.set(i.id, li);
     } else {
-      // keep what is current: the API can move openedAt, severity or summary between refreshes
-      li.className = `row ${i.severity}${acked.has(i.id) ? ' is-acked' : ''}`;
-      li.querySelector('.sev').textContent = i.severity;
-      li.querySelector('.what').textContent = `${i.service} · ${i.region} · ${i.summary}`;
-      const time = li.querySelector('time');
-      if (time.getAttribute('datetime') !== i.openedAt) {
-        time.setAttribute('datetime', i.openedAt);
-        time.title = i.openedAt;
-        time.textContent = formatLocal(i.openedAt);
-      }
+      refreshRow(li, i);
     }
     const want = prev ? prev.nextSibling : list.firstChild;
     if (want !== li) list.insertBefore(li, want);
@@ -98,7 +105,37 @@ function render(incidents) {
   const none = incidents.length === 0;
   empty.hidden = !none;
   list.hidden = none;
+  setPending(0);
 }
+
+// Product's decision (SCHED-4515): the list holds still while it is on screen. A refresh only updates the
+// rows already shown; new incidents wait behind the "N new" bar and come in when on-call clicks it.
+let latest = [];
+function update(incidents) {
+  latest = incidents;
+  if (rows.size === 0) return showAll(incidents); // nothing on screen yet, so nothing can move
+  let pending = 0;
+  for (const i of incidents) {
+    const li = rows.get(i.id);
+    if (li) refreshRow(li, i);
+    else pending++;
+  }
+  setPending(pending);
+}
+
+function setPending(n) {
+  newBar.dataset.count = String(n);
+  newBarText.textContent = n === 1 ? '1 new incident · show' : `${n} new incidents · show`;
+  // visibility, not display: the bar keeps its space, so showing it never pushes the rows down
+  newBar.classList.toggle('is-on', n > 0);
+  newBar.disabled = n === 0;
+  newBar.setAttribute('aria-hidden', n > 0 ? 'false' : 'true');
+}
+
+newBar.addEventListener('click', () => {
+  showAll(latest);
+  list.firstElementChild?.querySelector('[data-testid="ack"]')?.focus({ preventScroll: true });
+});
 
 function showError(msg) {
   errorBox.textContent = msg;
@@ -109,7 +146,7 @@ let loaded = false;
 async function tick() {
   try {
     const page = await fetchIncidents();
-    render(page.incidents);
+    update(page.incidents);
     errorBox.hidden = true;
     updated.textContent = `· updated ${formatLocal(page.updatedAt, { seconds: true })}`;
     if (!loaded) {
