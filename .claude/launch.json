@@ -1,1 +1,0 @@
-{ "version": "0.0.1", "configurations": [ { "name": "board", "runtimeExecutable": "npx", "runtimeArgs": ["--yes", "serve@14.2.4", "app", "-l", "5174"], "port": 5174 } ] }
