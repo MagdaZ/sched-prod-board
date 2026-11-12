@@ -1,4 +1,5 @@
-# Deploys app/ to GitHub Pages and stamps the commit sha into the build (R6).
+# Deploys app/ to GitHub Pages (R6). The build sha is the last commit that changed app/, so adding a
+# recording under evidence/ (served at /evidence/) does not change the build the board names.
 name: pages
 on:
   push:
@@ -19,8 +20,15 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Stamp build sha
-        run: sed -i "s/__BUILD_SHA__/${GITHUB_SHA}/g" app/index.html
+        run: |
+          BUILD=$(git log -1 --format=%H -- app)
+          echo "build $BUILD"
+          sed -i "s/__BUILD_SHA__/${BUILD}/g" app/index.html
+      - name: Add recordings
+        run: if [ -d evidence ]; then cp -r evidence app/evidence; fi
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
